@@ -1,5 +1,5 @@
 # snipit
-Summarise snps relative to a reference sequence
+Summarise amino acid changes relative to a reference sequence. _Note:_ This fork was modified to enable visualization of amino acid changes instead of nucleotide changes. For support running the original `snipit` program, please visit the original repository at [github.com/aineniamh/snipit](https://github.com/aineniamh/snipit).
 
 
 <img src="./docs/genome_graph.png" width="700">
