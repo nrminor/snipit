@@ -8,6 +8,7 @@ import collections
 from itertools import cycle, chain
 import csv
 import math
+from itertools import groupby, count
 from collections import OrderedDict
 
 # imports from other modules
@@ -28,11 +29,17 @@ YELLOW = '\033[93m'
 CYAN = '\u001b[36m'
 DIM = '\033[2m'
 
+def check_ref(recombi_mode):
+    if recombi_mode:
+        sys.stderr.write(red(f"Error: Please explicitly state reference sequence when using `--recombi-mode`\n"))
+        sys.exit(-1)
+
+
 def qc_alignment(alignment,reference,cwd):
     lengths = []
     lengths_info = []
     num_seqs = 0
-    
+
     record_ids = []
     ref_input = ""
 
@@ -54,7 +61,11 @@ def qc_alignment(alignment,reference,cwd):
         sys.exit(-1)
 
     if num_seqs == 1:
-        if reference.split(".")[-1] not in ["gb","genbank"]:
+        if reference:
+            if reference.split(".")[-1] not in ["gb","genbank"]:
+                sys.stderr.write(red(f"Error: alignment file must contain more than just the reference. Either provide a reference genbank file or add more sequences to your alignment.\n"))
+                sys.exit(-1)
+        else:
             sys.stderr.write(red(f"Error: alignment file must contain more than just the reference. Either provide a reference genbank file or add more sequences to your alignment.\n"))
             sys.exit(-1)
 
@@ -63,7 +74,7 @@ def qc_alignment(alignment,reference,cwd):
         for i in lengths_info:
             print(f"{i[0]}\t{i[1]}\n")
         sys.exit(-1)
-    
+
     return num_seqs,ref_input,record_ids,lengths[0]
 
 def reference_qc(reference, record_ids,cwd):
@@ -95,9 +106,29 @@ def reference_qc(reference, record_ids,cwd):
 
     return ref_file, ref_input
 
+
+def recombi_qc(recombi_refs, reference, record_ids,cwd):
+    recombi_refs = recombi_refs.split(",")
+    if not len(recombi_refs) == 2:
+        sys.stderr.write(red(f"Error: input 2 references separated by a comma for `--recombi-references`.\n"))
+        sys.exit(-1)
+
+    for ref in recombi_refs:
+        if ref == "":
+            sys.stderr.write(red(f"Error: input 2 references separated by a comma for `--recombi-references`.\n"))
+            sys.exit(-1)
+        if ref == reference:
+            sys.stderr.write(red(f"Error: please input a distinct outgroup reference from the parent recombinant references specified in `--recombi-references`.\n"))
+            sys.exit(-1)
+        if ref not in record_ids:
+            sys.stderr.write(red(f"Error: please check references specified in `--recombi-references` match a sequence name in the input alignment.\n"))
+            sys.exit(-1)
+
+
+
 def label_map(record_ids,labels,column_names,cwd):
     seq_col,label_col = column_names.split(",")
-    
+
     label_map = {}
     if labels:
         label_file = os.path.join(cwd,labels)
@@ -147,29 +178,61 @@ def get_ref_and_alignment(input_file,reference,label_map):
 
     return reference_seq, input_seqs
 
-def find_snps(reference_seq,input_seqs):
+def merge_indels(indel_list,prefix):
+    if indel_list:
+        groups = groupby(indel_list, key=lambda item, c=count():item-next(c))
+        tmp = [list(g) for k, g in groups]
+        merged_indels = []
+        for i in tmp:
+            indel = f"{i[0]}:{prefix}{len(i)}"
+            merged_indels.append(indel)
+        return merged_indels
 
+    return indel_list
+
+def find_snps(reference_seq,input_seqs,show_indels):
     non_amb = ["A","T","G","C", "L", "M", "F", "W", "K", "Q","E","S","P","V","I","Y","H","R","N","D","-"]
     snp_dict = {}
+
     record_snps = {}
-    snp_counter = collections.Counter()
+    var_counter = collections.Counter()
     for query_seq in input_seqs:
         snps =[]
-
+        insertions = []
+        deletions = []
         for i in range(len(query_seq)):
             bases = [query_seq[i],reference_seq[i]]
             if bases[0] != bases[1]:
-                if bases[0] in non_amb and bases[1] in non_amb:
-                    
-                    snp = f"{i+1}{bases[1]}{bases[0]}" # position-reference-query
-                    snp_counter[snp]+=1
+                if bases[0] not in ["A","T","G","C", "L", "M", "F", "W", "K", "Q","E","S","P","V","I","Y","H","R","N","D","T","-"]:
+
+                    snp = f"{i+1}:{bases[1]}{bases[0]}" # position-reference-query
+
                     snps.append(snp)
-        snp_dict[query_seq] = snps
+                elif bases[0]=='-' and show_indels:
+                #if there's a gap in the query, means a deletion
+                    deletions.append(i+1)
+                elif bases[1]=='-' and show_indels:
+                    #if there's a gap in the ref, means an insertion
+                    insertions.append(i+1)
+
+        if show_indels:
+            insertions = merge_indels(insertions,"ins")
+            deletions = merge_indels(deletions,"del")
+
+        variants = []
+        for var_list in [snps,insertions,deletions]:
+            for var in var_list:
+                var_counter[var]+=1
+                variants.append(var)
+
+        variants = sorted(variants, key = lambda x : int(x.split(":")[0]))
+
+        snp_dict[query_seq] = variants
 
         for record in input_seqs[query_seq]:
-            record_snps[record] = snps
+            record_snps[record] = variants
 
-    return snp_dict,record_snps,len(snp_counter)
+    return snp_dict,record_snps,len(var_counter)
 
 def find_ambiguities(alignment, snp_dict):
 
@@ -177,31 +240,94 @@ def find_ambiguities(alignment, snp_dict):
     for seq in snp_dict:
         snps = snp_dict[seq]
         for snp in snps:
-            x_position = int(snp[:-2])-1
-            ref = snp[-2]
-            snp_sites[x_position]=ref
+            pos,var = snp.split(":")
+            index = int(pos)-1
+
+            ref_allele = var[0]
+            snp_sites[index]=ref_allele
 
     amb_dict = {}
-    
+
     for query_seq in alignment:
         snps =[]
 
         for i in snp_sites:
-            bases = [query_seq[i],snp_sites[i]]
+            bases = [query_seq[i],snp_sites[i]] #if query not same as ref allele
             if bases[0] != bases[1]:
-                if bases[0] not in ["A","T","G","C", "L", "M", "F", "W", "K", "Q","E","S","P","V","I","Y","H","R","N","D","T","-"]:
-                    
-                    snp = f"{i+1}{bases[1]}{bases[0]}" # position-outgroup-query
+                if bases[0] not in ["A","T","G","C"]:
+
+                    snp = f"{i+1}:{bases[1]}{bases[0]}" # position-outgroup-query
                     snps.append(snp)
-        
+
         for record in alignment[query_seq]:
             amb_dict[record] = snps
 
     return amb_dict
 
-def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_dict,length,width,height,size_option,
-               flip_vertical=False,included_positions=None,excluded_positions=None,exclude_ambig_pos=False,
-               sort_by_mutation_number=False,high_to_low=True):
+
+def recombi_ref_snps(recombi_references, snp_records):
+
+    #print(recombi_references)
+    recombi_refs = recombi_references.split(",")
+    recombi_snps = []
+    #print(recombi_refs)
+    for ref in recombi_refs:
+        recombi_snps.append(snp_records[ref])
+
+    #print(recombi_snps)
+    return recombi_snps,recombi_refs
+
+def recombi_painter(snp_to_check,recombi_snps):
+
+    recombi_ref_1 = recombi_snps[0]
+    recombi_ref_2 = recombi_snps[1]
+    common_snps = []
+
+    for snp in recombi_ref_1:
+        if snp in recombi_ref_2:
+            common_snps.append(snp)
+
+    if snp_to_check in common_snps:
+        return "Both"
+    elif snp_to_check in recombi_ref_1:
+        return "lineage_1"
+    elif snp_to_check in recombi_ref_2:
+        return "lineage_2"
+    else:
+        return "Private"
+
+
+def write_out_snps(write_snps,record_snps,output_dir):
+    with open(os.path.join(output_dir,"snps.csv"),"w") as fw:
+        fw.write("record,snps,num_snps\n")
+        for record in record_snps:
+            snps = ";".join(record_snps[record])
+            fw.write(f"{record},{snps},{len(record_snps[record])}\n")
+
+
+def make_graph(num_seqs,
+                num_snps,
+                amb_dict,
+                snp_records,
+                output,
+                label_map,
+                colour_dict,
+                length,
+                width,
+                height,
+                size_option,
+                solid_background,
+               flip_vertical=False,
+               included_positions=None,
+               excluded_positions=None,
+               exclude_ambig_pos=False,
+               sort_by_mutation_number=False,
+               high_to_low=True,
+               sort_by_id=False,
+               sort_by_mutations=False,
+               recombi_mode=False,
+               recombi_references=[]
+               ):
     y_level = 0
     ref_vars = {}
     snp_dict = collections.defaultdict(list)
@@ -215,49 +341,100 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
         ordered_dict = dict(sorted(snp_counts.items(), key=lambda item: item[1], reverse=high_to_low))
         record_order = list(OrderedDict(ordered_dict).keys())
 
+    elif sort_by_id:
+        record_order = list(sorted(snp_records.keys()))
+
+    elif sort_by_mutations:
+        mutations = sort_by_mutations.split(",")
+        sortable_record = {}
+        for record in snp_records:
+            bases = []
+            for sort_mutation in mutations:
+                found = False
+                for record_mutation in snp_records[record]:
+                    if int(record_mutation.split(":")[0]) == int(sort_mutation):
+                        bases.append(record_mutation[-1])
+                        found = True
+                        break
+                if not found:
+                    bases.append("0")
+            sortable_record[record] = "".join(bases) + record
+        record_order = list(OrderedDict(sorted(sortable_record.items(), key=lambda item: item[1], reverse=high_to_low)).keys())
+
     else:
         record_order = list(snp_records.keys())
 
+    if recombi_mode:
+        # Get a list of SNPs present in each recombi_reference
+        recombi_snps,recombi_refs = recombi_ref_snps(recombi_references, snp_records)
+        # Set the colour palette to "recombi"
+        colour_dict = get_colours("recombi")
+        # Reorder list to put recombi_references at the start
+        record_order.remove(recombi_refs[0])
+        record_order.insert(0, recombi_refs[0])
+        record_order.remove(recombi_refs[1])
+        record_order.insert(1, recombi_refs[1])
+
     for record in record_order:
 
-        # y level increments per record
-        y_level +=1
+        # y level increments per record, add a gap after the two recombi_refs
+        if recombi_mode and y_level == 2:
+            y_level += 1.2
+        else:
+            y_level +=1
 
         # for each record get the list of snps
         snps = snp_records[record]
         x = []
         y = []
-        
+
         for snp in snps:
             # snp => 12345AT
-            x_position = int(snp[:-2])
-            base = snp[-1]
-            ref = snp[-2]
+            pos,var = snp.split(":")
+            x_position = int(pos)
+            if var.startswith("del"):
+                length_indel = var[3:]
+                ref = f"{length_indel}"
+                base = "-"
+            elif var.startswith("ins"):
+                length_indel = var[3:]
+                ref = "-"
+                base = f"{length_indel}"
+            else:
+                ref = var[0]
+                base = var[1]
+
             ref_vars[x_position]=ref
-            # Add name of record, ref, SNP in record, y_level
-            snp_dict[x_position].append((record, ref, base, y_level))
+            if recombi_mode:
+                recombi_out = recombi_painter(snp, recombi_snps)
+                # Add name of record, ref, SNP in record, y_level, if SNP is in either recombi_reference...
+                snp_dict[x_position].append((record, ref, base, y_level, recombi_out))
+            else:
+                # ...otherwise add False instead to help the colour logic
+                snp_dict[x_position].append((record, ref, base, y_level, False))
 
         # if there are ambiguities in that record, add them to the snp dict too
         if record in amb_dict:
-            for amb in amb_dict[record]:
+            for amb in sorted(amb_dict[record]):
                 # amb => 12345AN
-                x_position = int(amb[:-2])
+                pos,var = amb.split(":")
+                x_position = int(pos)
 
                 # if positions with any ambiguities should be ignored, note the position
                 if exclude_ambig_pos:
                     excluded_positions.add(x_position)
                 else:
-                    base = amb[-1]
-                    ref = amb[-2]
+                    ref = var[0]
+                    base = var[1]
                     ref_vars[x_position]=ref
-                    # Add name of record, ref, SNP in record, y_level
-                    snp_dict[x_position].append((record, ref, base, y_level))
+                    # Add name of record, ref, SNP in record, y_level and False for "recombi_mode" colour logic
+                    snp_dict[x_position].append((record, ref, base, y_level, False))
 
     # gather the positions that are not explicitly excluded,
     # but are not among those to be included
     positions_not_included=set()
     if len(included_positions)>0:
-        # of the positions present, 
+        # of the positions present,
         # gather a set of positions which should NOT be included in the output
         positions_not_included = set(snp_dict.keys()) - included_positions
 
@@ -268,7 +445,7 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
 
     spacing = length/(len(snp_dict)+1)
     y_inc = (spacing*0.8*y_level)/length
-    
+
     if size_option == "expand":
         if not width:
             if num_snps ==0:
@@ -310,8 +487,12 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
 
     for record in record_order:
 
-        # y position increments
-        y_level += y_inc
+        # y position increments, with a gap after the two recombi_refs
+        if recombi_mode and y_level == 2:
+            y_level += y_inc + 0.2
+        else:
+            y_level += y_inc
+
 
         # either grey or white
         col = next_colour()
@@ -324,6 +505,7 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
         ax.text(-50, y_level, label_map[record], size=9, ha="right", va="center")
 
     position = 0
+
     for snp in sorted(snp_dict):
         position += spacing
 
@@ -339,22 +521,25 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
         bottom_polygon = y_inc * -1.7
 
         for sequence in snp_dict[snp]:
-            
-            name,ref,var,y_pos = sequence
+
+            name,ref,var,y_pos,recombi_out = sequence
             bottom_of_box = (y_pos*y_inc)-(0.5*y_inc)
             # draw box for snp
-            if var in colour_dict:
+            if recombi_out:
+                rect = patches.Rectangle((left_of_box,bottom_of_box),spacing*0.8,  y_inc,alpha=0.5, fill=True, edgecolor='none',facecolor=colour_dict[recombi_out])
+            elif var in colour_dict:
                 rect = patches.Rectangle((left_of_box,bottom_of_box),spacing*0.8,  y_inc,alpha=0.5, fill=True, edgecolor='none',facecolor=colour_dict[var.upper()])
             else:
                 rect = patches.Rectangle((left_of_box,bottom_of_box), spacing*0.8,  y_inc,alpha=0.5, fill=True, edgecolor='none',facecolor="dimgrey")
-            
+
             ax.add_patch(rect)
 
             # sequence variant text
             ax.text(position, y_pos*y_inc, var, size=9, ha="center", va="center")
 
         # reference variant text
-        ax.text(position, y_inc * -0.2, ref, size=9, ha="center", va="center") 
+
+        ax.text(position, y_inc * -0.2, ref, size=9, ha="center", va="center")
 
         #polygon showing mapping from genome to spaced out snps
         x = [snp-0.5,snp+0.5,right_of_box,left_of_box,snp-0.5]
@@ -366,9 +551,16 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
         poly = patches.Polygon(coords, alpha=0.2, fill=True, edgecolor='none',facecolor="dimgrey")
         ax.add_patch(poly)
 
-        # 
         rect = patches.Rectangle((left_of_box,top_polygon), spacing*0.8, y_inc,alpha=0.1, fill=True, edgecolor='none',facecolor="dimgrey")
         ax.add_patch(rect)
+
+    if len(snp_dict) == 0:
+        # snp position labels
+        left_of_box = position-(0.4*position)
+        right_of_box = position+(0.4*position)
+
+        top_polygon = y_inc * -0.7
+        bottom_polygon = y_inc * -1.7
 
 
     # reference variant rectangle
@@ -393,7 +585,7 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
     ax.spines['bottom'].set_visible(False)
 
     plt.yticks([])
-            
+
     ax.set_xlim(0,length)
     if not flip_vertical:
         ax.set_ylim(ref_genome_position,y_level+(y_inc*1.05))
@@ -404,16 +596,21 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
     ax.tick_params(axis='x', labelsize=8)
     plt.xlabel("Genome position (base)", fontsize=9)
     plt.tight_layout()
-    plt.savefig(output)
+    if not solid_background:
+        plt.savefig(output, transparent=True)
+    else:
+        plt.savefig(output)
 
 def get_colours(colour_palette):
-    palettes = {"classic": {"I":"orchid","A":"steelblue","C":"indianred","T":"darkseagreen","G":"skyblue","L":"coral","M":"salmon","F":"bisque","W":"palegoldenrod","K":"mediumseagreen","Q":"medieumaquamarine","E":"yan","S":"powderblue","P":"yellowgreen","V":"slateblue","I":"darkviolet","Y":"teal","H":"teal","R":"hotpink","N":"deepskyblue","D":"indigo","-":"white"},
-                "wes": {"A":"#CC8B3C","C":"#456355","T":"#541F12","G":"#B62A3D"}, 
+
+    palettes = {"classic": {"A":"steelblue","C":"indianred","T":"darkseagreen","G":"skyblue"},
+                "wes": {"A":"#CC8B3C","C":"#456355","T":"#541F12","G":"#B62A3D"},
                 "primary": {"A":"green","C":"goldenrod","T":"steelblue","G":"indianred"},
                 "purine-pyrimidine":{"A":"indianred","C":"teal","T":"teal","G":"indianred"},
                 "greyscale":{"A":"#CCCCCC","C":"#999999","T":"#666666","G":"#333333"},
                 "blues":{"A":"#3DB19D","C":"#76C5BF","T":"#423761","G":"steelblue"},
-                "verity":{"A":"#EC799A","C":"#df6eb7","T":"#FF0080","G":"#9F0251"}
+                "verity":{"A":"#EC799A","C":"#df6eb7","T":"#FF0080","G":"#9F0251"},
+                "recombi":{"lineage_1":"steelblue","lineage_2":"#EA5463","Both":"darkseagreen","Private":"goldenrod"}
                 }
     if colour_palette not in palettes:
         sys.stderr.write(red(f"Error: please select one of {palettes} for --colour-palette option\n"))
