@@ -70,6 +70,10 @@ optional arguments:
 
 ### Install
 
+To install this version of `snipit`, we recommend you clone this repo into a working directory of your choice. In that directory, run the following:
+
 ```
-pip install snipit
+python3 setup.py install
 ```
+
+To double check it installed, run `snipit -v`. You may also choose to run `which snipit` to make sure it was installed somewhere reasonable.
