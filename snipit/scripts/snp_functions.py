@@ -407,7 +407,7 @@ def make_graph(num_seqs,num_snps,amb_dict,snp_records,output,label_map,colour_di
     plt.savefig(output)
 
 def get_colours(colour_palette):
-    palettes = {"classic": {"I":"orchid","A":"steelblue","C":"indianred","T":"darkseagreen","G":"skyblue","L":"coral","M":"salmon","F":"bisque","W":"palegoldenrod","K":"mediumseagreen","Q":"medieumaquamarine","E":"yan","S":"powderblue","P":"yellowgreen","V":"slateblue","I":"darkviolet","Y":"teal","H":"teal","R":"hotpink","N":"deepskyblue","D":"indigo","-":"white"},
+    palettes = {"classic": {"I":"orchid","A":"steelblue","C":"indianred","T":"darkseagreen","G":"skyblue","L":"coral","M":"salmon","F":"bisque","W":"palegoldenrod","K":"mediumseagreen","Q":"medieumaquamarine","E":"cyan","S":"powderblue","P":"yellowgreen","V":"slateblue","I":"darkviolet","Y":"teal","H":"teal","R":"hotpink","N":"deepskyblue","D":"indigo","-":"white"},
                 "wes": {"A":"#CC8B3C","C":"#456355","T":"#541F12","G":"#B62A3D"}, 
                 "primary": {"A":"green","C":"goldenrod","T":"steelblue","G":"indianred"},
                 "purine-pyrimidine":{"A":"indianred","C":"teal","T":"teal","G":"indianred"},
