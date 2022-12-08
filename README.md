@@ -1,5 +1,7 @@
 # snipit
-Summarise amino acid changes relative to a reference sequence. _Note:_ This fork was modified to enable visualization of amino acid changes instead of nucleotide changes. For support running the original `snipit` program, please visit the original repository at [github.com/aineniamh/snipit](https://github.com/aineniamh/snipit).
+Summarise nucleotide or amino acid changes relative to a reference sequence. 
+
+_Note:_ This fork is a modification of _snipit_ version 1.0.3, which enables visualization of amino acid changes instead of nucleotide changes. For support running the original `snipit` program, please visit the original repository at [github.com/aineniamh/snipit](https://github.com/aineniamh/snipit). Install the _snipit_ version from before our modifications with `pip install snipit==1.0.3`.
 
 
 <img src="./docs/genome_graph.png" width="700">
