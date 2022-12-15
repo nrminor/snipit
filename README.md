@@ -1,7 +1,7 @@
 # snipit
 Summarise nucleotide or amino acid changes relative to a reference sequence. 
 
-_Note:_ This fork is a modification of _snipit_ version 1.0.3, which enables visualization of amino acid changes instead of nucleotide changes. For support running the original `snipit` program, please visit the original repository at [github.com/aineniamh/snipit](https://github.com/aineniamh/snipit). Install the _snipit_ version from before our modifications with `pip install snipit==1.0.3`.
+_Note:_ This fork is a modification of _snipit_ version 1.0.3, which enables visualization of amino acid changes and nucleotide changes. It will not work if you have previous installations of _snipit_ on your system. For support running the original `snipit` program, please visit the original repository at [github.com/aineniamh/snipit](https://github.com/aineniamh/snipit). Install the _snipit_ version from before our modifications with `pip install snipit==1.0.3`.
 
 
 <img src="./docs/genome_graph.png" width="700">
@@ -58,7 +58,7 @@ optional arguments:
 
 ### Install
 
-To install this version of `snipit`, we recommend you clone this repo into a working directory of your choice. In that directory, run the following:
+To install this version of `snipit`, be sure to remove any previous installations of `snipit` with `pip uninstall snipit` and/or `conda uninstall snipit`. Next, we recommend you clone this repo into a working directory of your choice. In that directory, run the following:
 
 ```
 python3 setup.py install
